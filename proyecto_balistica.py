@@ -7,24 +7,26 @@ from matplotlib.animation import FuncAnimation
 from scipy.optimize import newton
 import time
 
-# --- LÓGICA MATEMÁTICA Y FÍSICA ---
+# --- 1. FUNCIONES FÍSICAS Y DERIVADA NUMÉRICA ---
 
-g = 9.81
+g = 9.81    # Aceleración de la gravedad (m/s²)
 
 def pos_p1(t, D, h, v, phi_rad):
-    """Calcula posición (x, y) del Proyectil 1."""
+    """Calcula posición (x, y) del Proyectil 1 en el instante t"""
     x = D + v * np.cos(phi_rad) * t
     y = h + v * np.sin(phi_rad) * t - 0.5 * g * t**2
     return x, y
 
 def calcular_parametros_intercepcion(tc, D, h, v, phi_rad, T):
-    """Calcula u, theta necesarios para interceptar en tiempo tc."""
-    dt = tc - T
-    if dt <= 1e-3: return np.inf, 0, 0, 0
+    """Para el tiempo de intercepción tc calcula: 
+    - u (velocidad inicial necesaria), 
+    - theta (ángulo de lanzamiento) necesarios para interceptar"""
+    dt = tc - T # Tiempo de vuelo del proyectil 2
+    if dt <= 1e-3: return np.inf, 0, 0, 0 
     
     target_x, target_y = pos_p1(tc, D, h, v, phi_rad)
     
-    if target_y < 0: return np.inf, 0, 0, 0 # Ya chocó con el suelo
+    if target_y < 0: return np.inf, 0, 0, 0 # si el objetivo ya cayó al suelo, no existe intercepción
     
     ux = target_x / dt
     uy = (target_y + 0.5 * g * dt**2) / dt
@@ -34,7 +36,7 @@ def calcular_parametros_intercepcion(tc, D, h, v, phi_rad, T):
     return u, theta, ux, uy
 
 def derivada_energia(tc, args):
-    """Derivada numérica para optimizar la energía (minima velocidad)."""
+    """Derivada numérica permite optimizar la energía (minima velocidad)"""
     D, h, v, phi_rad, T = args
     epsilon = 1e-5
     u1, _, _, _ = calcular_parametros_intercepcion(tc, D, h, v, phi_rad, T)
@@ -43,6 +45,7 @@ def derivada_energia(tc, args):
 
 # --- MÉTODOS NUMÉRICOS ---
 
+# Implementación del Método de Newton
 def metodo_newton(func, x0, args, tol=1e-6, max_iter=50):
     x = x0
     start = time.perf_counter()
@@ -50,13 +53,14 @@ def metodo_newton(func, x0, args, tol=1e-6, max_iter=50):
         f_val = func(x, args)
         eps = 1e-5
         f_prime = (func(x + eps, args) - f_val) / eps
-        if abs(f_prime) < 1e-10: break
+        if abs(f_prime) < 1e-10: break  # Evitar división por cero
         x_new = x - f_val / f_prime
         if abs(x_new - x) < tol:
             return x_new, i+1, (time.perf_counter() - start)*1000
         x = x_new
     return x, max_iter, (time.perf_counter() - start)*1000
 
+# Implementación del Método de la Secante
 def metodo_secante(func, x0, args, tol=1e-6, max_iter=50):
     x0_sec = x0 - 0.5
     x1_sec = x0 + 0.5
@@ -72,15 +76,19 @@ def metodo_secante(func, x0, args, tol=1e-6, max_iter=50):
         x1_sec = x_new
     return x1_sec, max_iter, (time.perf_counter() - start)*1000
 
+# --- SIMULACIÓN DE TRAYECTORIAS PARA ANIMAR LA INTERCEPCIÓN ---
 def simular_trayectorias(params, sigma_viento):
+    """Simula las trayectorias de ambos proyectiles con ruido de viento"""
     D, h, v, phi_rad, T, u, theta_rad, tc = params
     dt = 0.02
     steps = int(tc / dt) + 10
     
+    # Estado inicial del proyectil 1 (objetivo)
     r1 = np.array([D, h], dtype=float)
     v1 = np.array([v*np.cos(phi_rad), v*np.sin(phi_rad)], dtype=float)
     traj1 = [r1.copy()]
     
+    # Estado inicial del proyectil 2 (interceptor)
     r2 = np.array([0.0, 0.0], dtype=float)
     v2 = np.array([u*np.cos(theta_rad), u*np.sin(theta_rad)], dtype=float)
     traj2 = [r2.copy()]
@@ -88,11 +96,11 @@ def simular_trayectorias(params, sigma_viento):
     for i in range(steps):
         t = i * dt
         noise = np.random.normal(0, sigma_viento, 2)
-        
+        # Proyectil 1 siempre en movimiento
         v1[1] -= g * dt
         r1 += (v1 + noise) * dt
         traj1.append(r1.copy())
-        
+        # Proyectil 2 inicia solo después de T
         if t >= T:
             v2[1] -= g * dt
             r2 += (v2 + noise) * dt
@@ -105,16 +113,16 @@ def simular_trayectorias(params, sigma_viento):
 # --- INTERFAZ GRÁFICA (GUI) ---
 
 class AppBalistica:
+    """Interfaz gráfica principal para manejar entradas, simulación y animación."""
     def __init__(self, root):
         self.root = root
         self.root.title("Proyecto Final: Intercepción de Proyectiles")
         self.root.geometry("1200x800")
 
-        # Frame Principal
         main_frame = ttk.Frame(root, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- Panel de Control (Izquierda) ---
+        # --- Panel de Control (Izquierdo) ---
         control_frame = ttk.LabelFrame(main_frame, text="Parámetros de Entrada", padding="10")
         control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=5)
 
@@ -124,18 +132,18 @@ class AppBalistica:
         self.crear_input(control_frame, "Ángulo P1 (°):", "135", "phi")
         self.crear_input(control_frame, "Retraso T (s):", "2.0", "T")
         self.crear_input(control_frame, "Ruido Viento (σ):", "0.0", "wind")
-
+        
         btn_calc = ttk.Button(control_frame, text="🚀 Calcular y Simular", command=self.ejecutar)
         btn_calc.pack(pady=20, fill=tk.X)
 
-        # Resultados Textuales
+        # Etiquetas de resultados
         self.lbl_result = ttk.Label(control_frame, text="Resultados: Esperando...", wraplength=200)
         self.lbl_result.pack(pady=10)
         
         self.lbl_compare = ttk.Label(control_frame, text="", wraplength=200, font=("Arial", 8))
         self.lbl_compare.pack(pady=10)
 
-        # --- Panel Gráfico (Derecha) ---
+        # --- Panel Gráfico (Derecho) ---
         plot_frame = ttk.Frame(main_frame)
         plot_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
@@ -147,6 +155,7 @@ class AppBalistica:
         self.anim = None
 
     def crear_input(self, parent, label, default, key):
+        """Crea un campo de entrada con etiqueta"""
         frame = ttk.Frame(parent)
         frame.pack(fill=tk.X, pady=5)
         ttk.Label(frame, text=label).pack(anchor="w")
@@ -156,6 +165,7 @@ class AppBalistica:
         setattr(self, f"entry_{key}", entry)
 
     def ejecutar(self):
+        """Captura los datos de entrada, ejecuta cálculos y genera la animación"""
         try:
             # 1. Leer datos
             D = float(self.entry_D.get())
@@ -169,21 +179,21 @@ class AppBalistica:
             args = (D, h, v, phi_rad, T)
             guess = T + (D/v)*0.8 + 1.0
 
-            # 2. Ejecutar Métodos Numéricos
+            # 2. Métodos Numéricos
             res_newton = metodo_newton(derivada_energia, guess, args)
             res_secante = metodo_secante(derivada_energia, guess, args)
             
             tc_opt, it_n, time_n = res_newton
             _, it_s, time_s = res_secante # Usamos Newton para el cálculo final
 
-            # 3. Calcular Cinemática Final
+            # 3. Calculo final de velocidad y ángulo del interceptor
             u_fin, theta_fin, _, _ = calcular_parametros_intercepcion(tc_opt, D, h, v, phi_rad, T)
 
             if np.isinf(u_fin) or np.isnan(u_fin) or tc_opt <= T:
                 messagebox.showerror("Error Físico", "No es posible la intercepción con estos parámetros.\nEl objetivo está muy lejos o el retraso es muy grande.")
                 return
 
-            # 4. Actualizar UI
+            # 4. Mostrar resultados en pantalla
             self.lbl_result.config(text=f"✅ SOLUCIÓN ÓPTIMA:\n\nVelocidad P2: {u_fin:.2f} m/s\nÁngulo P2: {np.degrees(theta_fin):.2f}°\nTiempo Choque: {tc_opt:.2f} s")
             
             self.lbl_compare.config(text=f"COMPARACIÓN:\n\nNewton: {it_n} iters ({time_n:.3f} ms)\nSecante: {it_s} iters ({time_s:.3f} ms)")
@@ -198,14 +208,14 @@ class AppBalistica:
             messagebox.showerror("Error", "Por favor ingrese solo números válidos.")
 
     def animar(self, tr1, tr2):
-        # Limpiar gráfica anterior
+        """Grafica y anima las trayectorias de ambos proyectiles."""
         self.ax.clear()
         self.ax.set_xlabel("Distancia (m)")
         self.ax.set_ylabel("Altura (m)")
         self.ax.set_title("Simulación de Intercepción")
         self.ax.grid(True, linestyle='--', alpha=0.6)
 
-        # Ajustar límites
+        # Límites automáticos
         all_x = np.concatenate((tr1[:,0], tr2[:,0]))
         all_y = np.concatenate((tr1[:,1], tr2[:,1]))
         self.ax.set_xlim(min(0, np.min(all_x))-50, np.max(all_x)+50)
@@ -218,8 +228,8 @@ class AppBalistica:
         pt2, = self.ax.plot([], [], 'ro')
         self.ax.legend()
 
-        # Lógica de animación
-        step = max(1, len(tr1) // 100) # Optimización de frames
+        # Función de actualización para la animación
+        step = max(1, len(tr1) // 100)
 
         def update(frame):
             idx = frame * step
@@ -232,7 +242,7 @@ class AppBalistica:
             pt2.set_data([tr2[i2, 0]], [tr2[i2, 1]])
             return line1, pt1, line2, pt2
 
-        # Importante: Guardar referencia a self.anim
+        # Si ya hay una animación en curso, detenerla
         if self.anim: self.anim.event_source.stop()
         
         frames = max(len(tr1), len(tr2)) // step
